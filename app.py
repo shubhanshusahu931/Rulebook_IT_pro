@@ -5,23 +5,21 @@ import re
 import csv
 import math
 
-app = FastAPI(title="Rulebook QA")
+app = FastAPI(title="Rulebook Assistant")
 
 BASE = Path(__file__).parent / "corpus"
+
+DOCUMENTS = []
 
 
 # =========================================================
 # LOAD CORPUS
 # =========================================================
 
-DOCUMENTS = []
-
-
 def load_markdown():
     for file in sorted(BASE.glob("*.md")):
         text = file.read_text(encoding="utf-8")
 
-        # Split whenever a section starts
         parts = re.split(r"(?=## §)", text)
 
         for part in parts:
@@ -29,6 +27,7 @@ def load_markdown():
 
             if part.startswith("## §"):
                 lines = part.splitlines()
+
                 heading = lines[0].strip()
                 content = "\n".join(lines[1:]).strip()
 
@@ -67,7 +66,7 @@ load_csv()
 
 
 # =========================================================
-# TEXT SIMILARITY
+# SIMILARITY
 # =========================================================
 
 STOPWORDS = {
@@ -97,7 +96,7 @@ def similarity(question, document):
 
 
 # =========================================================
-# FIND DOCUMENT BY SECTION
+# SECTION FINDER
 # =========================================================
 
 def get_sections(section_numbers):
@@ -113,16 +112,10 @@ def get_sections(section_numbers):
 
 
 # =========================================================
-# NOT COVERED QUESTIONS
+# NOT COVERED
 # =========================================================
 
 NOT_COVERED_PHRASES = [
-    "laptops to scholarship students",
-    "choose their own roommates",
-    "maximum number of guests",
-    "attendance be transferred",
-    "special examination after missing it for vacation",
-    "scholarship funds be used to purchase a laptop",
     "family wedding",
     "bicycle",
     "laptop to scholarship",
@@ -145,6 +138,13 @@ NOT_COVERED_PHRASES = [
     "change my hostel room",
     "phd student",
     "voluntary trip",
+
+    "laptops to scholarship students",
+    "choose their own roommates",
+    "maximum number of guests",
+    "attendance be transferred",
+    "special examination after missing it for vacation",
+    "scholarship funds be used to purchase a laptop",
 ]
 
 
@@ -159,7 +159,7 @@ def is_not_covered(question):
 
 
 # =========================================================
-# SPECIAL CONFLICTS
+# CONFLICT DETECTION
 # =========================================================
 
 def attendance_medical_conflict(question):
@@ -176,17 +176,16 @@ def attendance_medical_conflict(question):
             or "below 75%" in q
         )
     ):
-        docs = get_sections(["1.1", "2.3"])
-
         return {
             "type": "CONFLICT",
             "answer": (
-                "The rulebook contains conflicting attendance provisions. "
-                "§1.1 states that students normally need 75% attendance, "
-                "while §2.3 states that an approved medical exemption "
-                "may permit attendance as low as 60%."
+                "The rulebook contains conflicting attendance "
+                "provisions. §1.1 states that students normally "
+                "need 75% attendance, while §2.3 states that an "
+                "approved medical exemption may permit attendance "
+                "as low as 60%."
             ),
-            "documents": docs
+            "documents": get_sections(["1.1", "2.3"])
         }
 
     return None
@@ -204,8 +203,6 @@ def attendance_waiver_conflict(question):
             or "75%" in q
         )
     ):
-        docs = get_sections(["1.1", "3.1"])
-
         return {
             "type": "CONFLICT",
             "answer": (
@@ -214,7 +211,7 @@ def attendance_waiver_conflict(question):
                 "while §3.1 allows the Academic Committee to waive "
                 "the ordinary attendance requirement."
             ),
-            "documents": docs
+            "documents": get_sections(["1.1", "3.1"])
         }
 
     return None
@@ -233,12 +230,10 @@ def fee_conflict(question):
     ):
         docs = []
 
-        # CSV evidence
         for doc in DOCUMENTS:
             if doc["source"] == "fee_deadlines.csv":
                 docs.append(doc)
 
-        # PDF rule is represented by the special notice section
         docs.append({
             "source": "special_notices.pdf",
             "section": "§11.2",
@@ -263,43 +258,33 @@ def fee_conflict(question):
 
 
 # =========================================================
-# TOPIC ROUTING
+# QUESTION ROUTING
 # =========================================================
 
 def route_question(question):
 
     q = question.lower()
 
-    # ---------- SCHOLARSHIP ----------
-
     if "scholarship" in q:
 
-        # GPA question → ONLY §6.2
         if "gpa" in q or "grade point" in q:
             return get_sections(["6.2"])
 
-        # Appeal question → §6.3
         if "appeal" in q:
             return get_sections(["6.3"])
 
-        # Email / communication → §6.4
         if "email" in q or "communicated" in q:
             return get_sections(["6.4"])
 
-        # Credit requirement
         if "credit" in q:
             return get_sections(["6.1"])
 
         return get_sections(["6.1", "6.2", "6.3", "6.4"])
 
 
-    # ---------- HOSTEL ----------
-
     if "hostel" in q or "curfew" in q or "guest" in q:
         return get_sections(["7.1", "7.2", "7.3", "7.4"])
 
-
-    # ---------- LIBRARY ----------
 
     if (
         "library" in q
@@ -311,8 +296,6 @@ def route_question(question):
         return get_sections(["8.1", "8.2", "8.3", "8.4"])
 
 
-    # ---------- EXAM ----------
-
     if (
         "exam" in q
         or "examination" in q
@@ -320,8 +303,6 @@ def route_question(question):
     ):
         return get_sections(["4.1", "4.2", "4.3", "4.4"])
 
-
-    # ---------- DISCIPLINE ----------
 
     if (
         "discipline" in q
@@ -332,8 +313,6 @@ def route_question(question):
         return get_sections(["10.1", "10.2", "10.3", "10.4"])
 
 
-    # ---------- SOCIETY ----------
-
     if (
         "society" in q
         or "societies" in q
@@ -342,13 +321,9 @@ def route_question(question):
         return get_sections(["9.1", "9.2", "9.3", "9.4"])
 
 
-    # ---------- MEDICAL ----------
-
     if "medical" in q or "hospital" in q:
         return get_sections(["2.1", "2.2", "2.3", "2.4"])
 
-
-    # ---------- ATTENDANCE ----------
 
     if "attendance" in q:
         return get_sections(["1.1", "1.2", "1.3", "1.4"])
@@ -358,12 +333,11 @@ def route_question(question):
 
 
 # =========================================================
-# GENERATE ANSWER
+# ANSWER ENGINE
 # =========================================================
 
 def make_answer(question):
 
-    # 1. Explicit NOT COVERED
     if is_not_covered(question):
         return {
             "type": "NOT_COVERED",
@@ -375,21 +349,24 @@ def make_answer(question):
         }
 
 
-    # 2. Conflicts
     result = attendance_medical_conflict(question)
+
     if result:
         return result
+
 
     result = attendance_waiver_conflict(question)
+
     if result:
         return result
+
 
     result = fee_conflict(question)
+
     if result:
         return result
 
 
-    # 3. Route to relevant topic
     docs = route_question(question)
 
     if not docs:
@@ -403,28 +380,30 @@ def make_answer(question):
         }
 
 
-    # 4. Rank only the selected documents
     ranked = []
 
     for doc in docs:
-        score = similarity(question, doc["text"])
+
+        score = similarity(
+            question,
+            doc["text"]
+        )
 
         ranked.append({
             **doc,
             "score": score
         })
 
-    ranked.sort(key=lambda x: x["score"], reverse=True)
 
+    ranked.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
 
-    # =====================================================
-    # SPECIAL CLEAN ANSWERS
-    # =====================================================
 
     q = question.lower()
 
 
-    # GPA
     if "scholarship" in q and "gpa" in q:
         return {
             "type": "ANSWERED",
@@ -436,7 +415,6 @@ def make_answer(question):
         }
 
 
-    # Scholarship appeal
     if "scholarship" in q and "appeal" in q:
         return {
             "type": "ANSWERED",
@@ -448,7 +426,6 @@ def make_answer(question):
         }
 
 
-    # Hostel curfew
     if "curfew" in q:
         return {
             "type": "ANSWERED",
@@ -459,7 +436,6 @@ def make_answer(question):
         }
 
 
-    # Discipline appeal
     if "appeal" in q and "disciplin" in q:
         return {
             "type": "ANSWERED",
@@ -471,7 +447,6 @@ def make_answer(question):
         }
 
 
-    # Library loan
     if "borrow" in q and "library" in q:
         return {
             "type": "ANSWERED",
@@ -482,7 +457,6 @@ def make_answer(question):
         }
 
 
-    # Society event approval
     if "event" in q and "approval" in q:
         return {
             "type": "ANSWERED",
@@ -494,113 +468,341 @@ def make_answer(question):
         }
 
 
-    # Default answer
-    best = ranked[:3]
-
-    answer_text = best[0]["text"]
-
     return {
         "type": "ANSWERED",
-        "answer": answer_text,
-        "documents": best
+        "answer": ranked[0]["text"],
+        "documents": ranked[:3]
     }
 
 
 # =========================================================
-# HTML
+# NEW UI
 # =========================================================
 
-def render_page():
+def page_css():
 
     return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Rulebook QA</title>
+    <style>
 
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                max-width: 1000px;
-                margin: 40px auto;
-                padding: 20px;
-                background: #f5f5f5;
-            }
+    * {
+        box-sizing: border-box;
+    }
 
-            h1 {
-                color: #222;
-            }
+    body {
+        margin: 0;
+        font-family: Arial, Helvetica, sans-serif;
+        background: #f4f7fb;
+        color: #172033;
+    }
 
-            textarea {
-                width: 100%;
-                height: 90px;
-                padding: 10px;
-                font-size: 16px;
-            }
+    .topbar {
+        height: 70px;
+        background: #172554;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 7%;
+    }
 
-            button {
-                margin-top: 10px;
-                padding: 12px 25px;
-                font-size: 16px;
-                cursor: pointer;
-            }
+    .brand {
+        font-size: 22px;
+        font-weight: 700;
+    }
 
-            .box {
-                background: white;
-                padding: 20px;
-                margin-top: 20px;
-                border-radius: 8px;
-            }
+    .tag {
+        font-size: 13px;
+        background: #26366f;
+        padding: 8px 14px;
+        border-radius: 20px;
+    }
 
-            .evidence {
-                background: #fafafa;
-                padding: 15px;
-                margin-top: 12px;
-                border-left: 4px solid #555;
-            }
+    .hero {
+        background: #172554;
+        color: white;
+        padding: 65px 7% 90px;
+    }
 
-            .score {
-                font-weight: bold;
-            }
+    .hero h1 {
+        font-size: 42px;
+        margin: 0 0 14px;
+    }
 
-            pre {
-                white-space: pre-wrap;
-            }
-        </style>
-    </head>
+    .hero p {
+        max-width: 680px;
+        line-height: 1.7;
+        color: #dbe4ff;
+        font-size: 16px;
+    }
 
-    <body>
+    .container {
+        width: 86%;
+        max-width: 1050px;
+        margin: -45px auto 50px;
+    }
 
-        <h1>University Rulebook QA</h1>
+    .search-card {
+        background: white;
+        padding: 28px;
+        border-radius: 14px;
+        box-shadow: 0 12px 35px rgba(0,0,0,.10);
+    }
 
-        <form method="post" action="/ask">
+    textarea {
+        width: 100%;
+        height: 110px;
+        resize: vertical;
+        border: 1px solid #d8deea;
+        border-radius: 10px;
+        padding: 16px;
+        font-size: 16px;
+        outline: none;
+    }
 
-            <textarea
-                name="question"
-                placeholder="Ask a question about the university rulebook..."
-                required
-            ></textarea>
+    textarea:focus {
+        border-color: #536dfe;
+    }
 
-            <br>
+    .ask-btn {
+        margin-top: 14px;
+        background: #172554;
+        color: white;
+        border: none;
+        padding: 13px 28px;
+        border-radius: 8px;
+        font-size: 15px;
+        cursor: pointer;
+    }
 
-            <button type="submit">Ask</button>
+    .ask-btn:hover {
+        background: #263b83;
+    }
 
-        </form>
+    .examples {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 15px;
+    }
 
-    </body>
-    </html>
+    .example {
+        background: #eef2ff;
+        color: #29376b;
+        padding: 7px 11px;
+        border-radius: 20px;
+        font-size: 12px;
+    }
+
+    .result-grid {
+        display: grid;
+        grid-template-columns: 1.1fr .9fr;
+        gap: 22px;
+        margin-top: 25px;
+    }
+
+    .panel {
+        background: white;
+        padding: 25px;
+        border-radius: 14px;
+        box-shadow: 0 5px 20px rgba(0,0,0,.06);
+    }
+
+    .panel h2 {
+        margin-top: 0;
+        font-size: 18px;
+    }
+
+    .status {
+        display: inline-block;
+        padding: 7px 13px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 12px;
+        margin-bottom: 15px;
+    }
+
+    .answered {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .conflict {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    .notcovered {
+        background: #fef3c7;
+        color: #92400e;
+    }
+
+    .answer {
+        font-size: 17px;
+        line-height: 1.7;
+    }
+
+    .evidence {
+        border: 1px solid #e1e6ef;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 12px;
+        background: #fafbfe;
+    }
+
+    .section {
+        font-weight: bold;
+        font-size: 15px;
+    }
+
+    .score {
+        display: inline-block;
+        margin-top: 7px;
+        font-size: 12px;
+        background: #e8edff;
+        padding: 5px 8px;
+        border-radius: 5px;
+    }
+
+    .source {
+        color: #687386;
+        font-size: 12px;
+        margin-top: 8px;
+    }
+
+    .evidence-text {
+        margin-top: 10px;
+        font-size: 13px;
+        line-height: 1.55;
+        color: #465064;
+    }
+
+    footer {
+        text-align: center;
+        padding: 25px;
+        color: #7b8495;
+        font-size: 12px;
+    }
+
+    @media(max-width: 750px) {
+
+        .result-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .hero h1 {
+            font-size: 32px;
+        }
+
+        .topbar {
+            padding: 0 5%;
+        }
+
+        .container {
+            width: 92%;
+        }
+    }
+
+    </style>
     """
 
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return render_page()
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+
+    <head>
+        <title>Rulebook Assistant</title>
+        {page_css()}
+    </head>
+
+    <body>
+
+        <div class="topbar">
+            <div class="brand">Rulebook Assistant</div>
+            <div class="tag">University Policy QA</div>
+        </div>
+
+        <section class="hero">
+
+            <h1>Ask the Rulebook.</h1>
+
+            <p>
+                Search university policies, regulations and notices
+                using natural language. Answers are supported with
+                section references and evidence from the rulebook.
+            </p>
+
+        </section>
+
+
+        <main class="container">
+
+            <div class="search-card">
+
+                <form method="post" action="/ask">
+
+                    <textarea
+                        name="question"
+                        placeholder="Example: What is the minimum GPA required for a merit scholarship?"
+                        required
+                    ></textarea>
+
+                    <button class="ask-btn" type="submit">
+                        Search Rulebook
+                    </button>
+
+                </form>
+
+
+                <div class="examples">
+
+                    <span class="example">
+                        Scholarship GPA
+                    </span>
+
+                    <span class="example">
+                        Hostel curfew
+                    </span>
+
+                    <span class="example">
+                        Attendance rules
+                    </span>
+
+                    <span class="example">
+                        Exam eligibility
+                    </span>
+
+                </div>
+
+            </div>
+
+        </main>
+
+
+        <footer>
+            University Rulebook QA • Evidence-based policy search
+        </footer>
+
+    </body>
+
+    </html>
+    """
 
 
 @app.post("/ask", response_class=HTMLResponse)
 def ask(question: str = Form(...)):
 
     result = make_answer(question)
+
+    status_class = {
+        "ANSWERED": "answered",
+        "CONFLICT": "conflict",
+        "NOT_COVERED": "notcovered"
+    }.get(result["type"], "answered")
+
 
     evidence_html = ""
 
@@ -611,104 +813,133 @@ def ask(question: str = Form(...)):
         evidence_html += f"""
         <div class="evidence">
 
-            <b>{doc['section']}</b>
+            <div class="section">
+                {doc["section"]}
+            </div>
 
-            <p class="score">
+            <div class="score">
                 Similarity: {score:.3f}
-            </p>
+            </div>
 
-            <pre>{doc['text']}</pre>
+            <div class="evidence-text">
+                {doc["text"]}
+            </div>
 
-            <small>
-                Source: {doc['source']}
-            </small>
+            <div class="source">
+                Source: {doc["source"]}
+            </div>
 
         </div>
         """
 
 
+    if not evidence_html:
+
+        evidence_html = """
+        <p>
+            No supporting rulebook passage was found.
+        </p>
+        """
+
+
     return f"""
     <!DOCTYPE html>
+
     <html>
 
     <head>
-        <title>Rulebook QA Result</title>
 
-        <style>
-            body {{
-                font-family: Arial, sans-serif;
-                max-width: 1000px;
-                margin: 40px auto;
-                padding: 20px;
-                background: #f5f5f5;
-            }}
+        <title>Rulebook Assistant</title>
 
-            .box {{
-                background: white;
-                padding: 20px;
-                margin-top: 20px;
-                border-radius: 8px;
-            }}
-
-            .type {{
-                font-size: 24px;
-                font-weight: bold;
-            }}
-
-            .evidence {{
-                background: #fafafa;
-                padding: 15px;
-                margin-top: 12px;
-                border-left: 4px solid #555;
-            }}
-
-            .score {{
-                font-weight: bold;
-            }}
-
-            pre {{
-                white-space: pre-wrap;
-                font-family: Arial, sans-serif;
-            }}
-
-            a {{
-                display: inline-block;
-                margin-top: 20px;
-            }}
-        </style>
+        {page_css()}
 
     </head>
 
+
     <body>
 
-        <div class="box">
+        <div class="topbar">
 
-            <div class="type">
-                {result['type']}
+            <div class="brand">
+                Rulebook Assistant
             </div>
 
-            <h2>Answer</h2>
+            <div class="tag">
+                University Policy QA
+            </div>
+
+        </div>
+
+
+        <section class="hero">
+
+            <h1>Rulebook Search Results</h1>
 
             <p>
-                {result['answer']}
+                Your question has been checked against the
+                available university rulebook corpus.
             </p>
 
-        </div>
+        </section>
 
 
-        <div class="box">
+        <main class="container">
 
-            <h2>Evidence & Citations</h2>
+            <div class="search-card">
 
-            {evidence_html if evidence_html else
-             "<p>No supporting evidence found.</p>"}
+                <form method="post" action="/ask">
 
-        </div>
+                    <textarea
+                        name="question"
+                        required
+                    >{question}</textarea>
+
+                    <button class="ask-btn" type="submit">
+                        Search Again
+                    </button>
+
+                </form>
+
+            </div>
 
 
-        <a href="/">
-            ← Ask another question
-        </a>
+            <div class="result-grid">
+
+
+                <div class="panel">
+
+                    <h2>Response</h2>
+
+                    <div class="status {status_class}">
+                        {result["type"]}
+                    </div>
+
+                    <div class="answer">
+                        {result["answer"]}
+                    </div>
+
+                </div>
+
+
+                <div class="panel">
+
+                    <h2>Evidence & Citations</h2>
+
+                    {evidence_html}
+
+                </div>
+
+
+            </div>
+
+
+        </main>
+
+
+        <footer>
+            Rulebook Assistant • Evidence-based university policy search
+        </footer>
+
 
     </body>
 
