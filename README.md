@@ -78,13 +78,10 @@ RulebookQA/
 
 ### Step 1 — Dependencies install karo
 
-⚠️ Note: `requirements.txt` filhal khaali hai, isliye manually ye 3 packages install karo:
 
 ```bash
-pip install fastapi uvicorn python-multipart
+pip install -r requirements.txt
 ```
-
-(Behtar hoga in packages ko `requirements.txt` me bhi likh do, taki future me `pip install -r requirements.txt` seedha kaam kare.)
 
 ### Step 2 — Project folder me jao
 
